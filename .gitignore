@@ -1,0 +1,73 @@
+# STM32CubeIDE
+.metadata/
+.settings/
+.project
+.cproject
+.launches/
+*.launch
+
+# Build outputs
+Debug/
+Release/
+build/
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.su
+*.cyclo
+
+# Object files
+*.o
+*.obj
+
+# Generated files
+*.d
+*.dep
+
+# STM32CubeMX generated files (optional - uncomment if you want to ignore them)
+# Src/main.c
+# Inc/main.h
+# Src/stm32*xx_hal_msp.c
+# Src/stm32*xx_it.c
+# Inc/stm32*xx_it.h
+
+# Drivers (HAL/CMSIS) - usually keep these
+# Drivers/
+
+# Documentation
+*.pdf
+*.doc
+*.docx
+
+# Temporary files
+*.tmp
+*.temp
+*~
+*.swp
+*.swo
+
+# IDE specific
+*.workspace
+.vscode/
+*.sublime-*
+
+# OS specific
+.DS_Store
+Thumbs.db
+*.log
+
+# Custom user files
+*.user
+*.suo
+*.vcxproj.user
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Library files (uncomment if not needed in repo)
+# *.lib
+# *.a
