@@ -19,6 +19,8 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
+#include "dma.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -47,6 +49,13 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+#define BLOCK_SAMPLES 128
+#define ADC_BUF_LEN   (BLOCK_SAMPLES * 2) // 2 channel per sample-pair
+
+static volatile uint16_t adc_buf[ADC_BUF_LEN];
+static volatile uint8_t dma_half_ready = 0;
+static volatile uint8_t dma_full_ready = 0;
+static uint32_t sample_idx = 0; // +1 per sample-pair (2 ms)
 
 /* USER CODE END PV */
 
@@ -90,9 +99,13 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART1_UART_Init();
   MX_ADC1_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, ADC_BUF_LEN);
+  HAL_TIM_Base_Start(&htim2);
 
   /* USER CODE END 2 */
 
@@ -103,31 +116,34 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-uint16_t vals[2] = {0};   // [npb1, npb0]
-char msg[64];
+    char line[64];
 
-if (HAL_ADC_Start(&hadc1) == HAL_OK) {
-  for (int i = 0; i < 2; i++) {
-    if (HAL_ADC_PollForConversion(&hadc1, 1000) == HAL_OK) {
-      vals[i] = HAL_ADC_GetValue(&hadc1);
-    }
+if (dma_half_ready) {
+  dma_half_ready = 0;
+  for (uint32_t i = 0; i < ADC_BUF_LEN/2; i += 2) {
+    uint16_t npb1 = adc_buf[i + 0]; // Rank1 = PB1 (IN9)
+    uint16_t npb0 = adc_buf[i + 1]; // Rank2 = PB0 (IN8)
+    uint32_t t_ms = sample_idx * 2U; // 500 sps => 2 ms
+    sample_idx++;
+    int n = snprintf(line, sizeof(line), "%lu, %u, %u\r\n", t_ms, npb1, npb0);
+    if (n > 0) HAL_UART_Transmit(&huart1, (uint8_t*)line, (uint16_t)n, 100);
   }
-  HAL_ADC_Stop(&hadc1);
 }
 
-uint16_t npb1 = vals[0];  // Rank 1: PB1 (IN9)
-uint16_t npb0 = vals[1];  // Rank 2: PB0 (IN8)
+if (dma_full_ready) {
+  dma_full_ready = 0;
+  for (uint32_t i = ADC_BUF_LEN/2; i < ADC_BUF_LEN; i += 2) {
+    uint16_t npb1 = adc_buf[i + 0];
+    uint16_t npb0 = adc_buf[i + 1];
+    uint32_t t_ms = sample_idx * 2U;
+    sample_idx++;
+    int n = snprintf(line, sizeof(line), "%lu, %u, %u\r\n", t_ms, npb1, npb0);
+    if (n > 0) HAL_UART_Transmit(&huart1, (uint8_t*)line, (uint16_t)n, 100);
+  }
 
-uint32_t mv_pb1 = (npb1 * 3300U) / 4095U;
-uint32_t mv_pb0 = (npb0 * 3300U) / 4095U;
-
-sprintf(msg, "PB1: %u (%lummV), PB0: %u (%lummV)\n", npb1, mv_pb1, npb0, mv_pb0);
-HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), 100);
-
-HAL_GPIO_WritePin(LED_BUILTIN_GPIO_Port, LED_BUILTIN_Pin, GPIO_PIN_RESET);
-HAL_Delay(250);
-HAL_GPIO_WritePin(LED_BUILTIN_GPIO_Port, LED_BUILTIN_Pin, GPIO_PIN_SET);
-HAL_Delay(250);
+  // Opsional: indikator
+  HAL_GPIO_TogglePin(LED_BUILTIN_GPIO_Port, LED_BUILTIN_Pin);
+}
   }
   /* USER CODE END 3 */
 }
@@ -149,10 +165,14 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 25;
+  RCC_OscInitStruct.PLL.PLLN = 336;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -162,18 +182,24 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc) {
+  if (hadc->Instance == ADC1) dma_half_ready = 1;
+}
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
+  if (hadc->Instance == ADC1) dma_full_ready = 1;
+}
 
 /* USER CODE END 4 */
 
