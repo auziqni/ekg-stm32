@@ -99,39 +99,36 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
-{
+  {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    uint16_t adc_value = 0;
-    char debug_msg[50];
+uint16_t vals[2] = {0};   // [npb1, npb0]
+char msg[64];
 
-    // Read ADC
-    HAL_StatusTypeDef start_result = HAL_ADC_Start(&hadc1);
-    
-    if (start_result == HAL_OK) {
-        if (HAL_ADC_PollForConversion(&hadc1, 1000) == HAL_OK) {
-            adc_value = HAL_ADC_GetValue(&hadc1);
-            
-            // Convert to millivolts (no float needed)
-            uint32_t millivolts = (adc_value * 3300) / 4095;
-            
-            sprintf(debug_msg, "ADC: %d, mV: %lu\n", adc_value, millivolts);
-            HAL_UART_Transmit(&huart1, (uint8_t*)debug_msg, strlen(debug_msg), 100);
-        } else {
-            HAL_UART_Transmit(&huart1, (uint8_t*)"ADC Poll Failed\n", 16, 100);
-        }
-        HAL_ADC_Stop(&hadc1);
-    } else {
-        HAL_UART_Transmit(&huart1, (uint8_t*)"ADC Start Failed\n", 17, 100);
+if (HAL_ADC_Start(&hadc1) == HAL_OK) {
+  for (int i = 0; i < 2; i++) {
+    if (HAL_ADC_PollForConversion(&hadc1, 1000) == HAL_OK) {
+      vals[i] = HAL_ADC_GetValue(&hadc1);
     }
-
-    // LED blink
-    HAL_GPIO_WritePin(LED_BUILTIN_GPIO_Port, LED_BUILTIN_Pin, GPIO_PIN_RESET);  // LED ON
-    HAL_Delay(500);
-    HAL_GPIO_WritePin(LED_BUILTIN_GPIO_Port, LED_BUILTIN_Pin, GPIO_PIN_SET);    // LED OFF
-    HAL_Delay(500);
+  }
+  HAL_ADC_Stop(&hadc1);
 }
+
+uint16_t npb1 = vals[0];  // Rank 1: PB1 (IN9)
+uint16_t npb0 = vals[1];  // Rank 2: PB0 (IN8)
+
+uint32_t mv_pb1 = (npb1 * 3300U) / 4095U;
+uint32_t mv_pb0 = (npb0 * 3300U) / 4095U;
+
+sprintf(msg, "PB1: %u (%lummV), PB0: %u (%lummV)\n", npb1, mv_pb1, npb0, mv_pb0);
+HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), 100);
+
+HAL_GPIO_WritePin(LED_BUILTIN_GPIO_Port, LED_BUILTIN_Pin, GPIO_PIN_RESET);
+HAL_Delay(250);
+HAL_GPIO_WritePin(LED_BUILTIN_GPIO_Port, LED_BUILTIN_Pin, GPIO_PIN_SET);
+HAL_Delay(250);
+  }
   /* USER CODE END 3 */
 }
 
