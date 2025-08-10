@@ -57,6 +57,11 @@ static volatile uint8_t dma_half_ready = 0;
 static volatile uint8_t dma_full_ready = 0;
 static uint32_t sample_idx = 0; // +1 per sample-pair (2 ms)
 
+// Debug SPS variables
+volatile uint32_t target_sps = 500; // configurable target sampling rate (sample-pair per second)
+static volatile uint32_t sps_counter = 0; // counts sent sample-pairs in the last 1s window
+static uint32_t sps_last_ms = 0;          // timestamp of last SPS report
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -107,6 +112,9 @@ int main(void)
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, ADC_BUF_LEN);
   HAL_TIM_Base_Start(&htim2);
 
+  // Initialize SPS timing window
+  sps_last_ms = HAL_GetTick();
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -127,6 +135,7 @@ if (dma_half_ready) {
     sample_idx++;
     int n = snprintf(line, sizeof(line), "%lu, %u, %u\r\n", t_ms, npb1, npb0);
     if (n > 0) HAL_UART_Transmit(&huart1, (uint8_t*)line, (uint16_t)n, 100);
+    sps_counter++; // one sample-pair sent
   }
 }
 
@@ -139,10 +148,27 @@ if (dma_full_ready) {
     sample_idx++;
     int n = snprintf(line, sizeof(line), "%lu, %u, %u\r\n", t_ms, npb1, npb0);
     if (n > 0) HAL_UART_Transmit(&huart1, (uint8_t*)line, (uint16_t)n, 100);
+    sps_counter++;
   }
 
   // Opsional: indikator
   HAL_GPIO_TogglePin(LED_BUILTIN_GPIO_Port, LED_BUILTIN_Pin);
+}
+
+// Periodic SPS debug report every 1 second
+uint32_t now = HAL_GetTick();
+if ((now - sps_last_ms) >= 1000U) {
+  uint32_t sps = sps_counter;
+  sps_counter = 0;
+  sps_last_ms += 1000U; // keep cadence, reduce drift
+
+  uint32_t eff = (target_sps > 0U) ? (sps * 100U) / target_sps : 0U;
+  int n = snprintf(line, sizeof(line),
+                   "# debug_info -> sps: %lu, target: %lu, efficiency: %lu%%\r\n",
+                   sps, target_sps, eff);
+  if (n > 0) {
+    HAL_UART_Transmit(&huart1, (uint8_t*)line, (uint16_t)n, 100);
+  }
 }
   }
   /* USER CODE END 3 */
