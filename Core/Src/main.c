@@ -60,7 +60,7 @@ static volatile uint8_t dma_full_ready = 0;
 static uint32_t sample_idx = 0; // +1 per sample-pair (2 ms)
 
 // Debug SPS variables
-volatile uint32_t target_sps = 500; // configurable target sampling rate (sample-pair per second)
+volatile uint32_t target_sps = 400; // configurable target sampling rate (sample-pair per second)
 static volatile uint32_t sps_counter = 0; // counts sent sample-pairs in the last 1s window
 static uint32_t sps_last_ms = 0;          // timestamp of last SPS report
 
