@@ -28,6 +28,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 
 /* USER CODE END Includes */
 
@@ -50,7 +51,8 @@
 
 /* USER CODE BEGIN PV */
 #define BLOCK_SAMPLES 128
-#define ADC_BUF_LEN   (BLOCK_SAMPLES * 2) // 2 channel per sample-pair
+#define NUM_CHANNELS   9
+#define ADC_BUF_LEN   (BLOCK_SAMPLES * NUM_CHANNELS)
 
 static volatile uint16_t adc_buf[ADC_BUF_LEN];
 static volatile uint8_t dma_half_ready = 0;
@@ -61,6 +63,9 @@ static uint32_t sample_idx = 0; // +1 per sample-pair (2 ms)
 volatile uint32_t target_sps = 500; // configurable target sampling rate (sample-pair per second)
 static volatile uint32_t sps_counter = 0; // counts sent sample-pairs in the last 1s window
 static uint32_t sps_last_ms = 0;          // timestamp of last SPS report
+
+// Debug toggle
+volatile bool debug_enabled = true; // set true to enable periodic debug info
 
 /* USER CODE END PV */
 
@@ -128,30 +133,57 @@ int main(void)
 
 if (dma_half_ready) {
   dma_half_ready = 0;
-  for (uint32_t i = 0; i < ADC_BUF_LEN/2; i += 2) {
-    uint16_t npb1 = adc_buf[i + 0]; // Rank1 = PB1 (IN9)
-    uint16_t npb0 = adc_buf[i + 1]; // Rank2 = PB0 (IN8)
-    uint32_t t_ms = sample_idx * 2U; // 500 sps => 2 ms
+  for (uint32_t i = 0; i < ADC_BUF_LEN/2; i += NUM_CHANNELS) {
+    uint16_t v_pb1 = adc_buf[i + 0];
+    uint16_t v_pb0 = adc_buf[i + 1];
+    uint16_t v_a7  = adc_buf[i + 2];
+    uint16_t v_a6  = adc_buf[i + 3];
+    uint16_t v_a5  = adc_buf[i + 4];
+    uint16_t v_a4  = adc_buf[i + 5];
+    uint16_t v_a3  = adc_buf[i + 6];
+    uint16_t v_a2  = adc_buf[i + 7];
+    uint16_t v_a1  = adc_buf[i + 8];
+    uint32_t t_ms = sample_idx * 2U;
     sample_idx++;
-    int n = snprintf(line, sizeof(line), "%lu, %u, %u\r\n", t_ms, npb1, npb0);
+    int n = snprintf(line, sizeof(line),
+                     "%06lX,%03X,%03X,%03X,%03X,%03X,%03X,%03X,%03X,%03X;",
+                     (unsigned long)t_ms,
+                     (unsigned int)v_pb1, (unsigned int)v_pb0,
+                     (unsigned int)v_a7,  (unsigned int)v_a6,
+                     (unsigned int)v_a5,  (unsigned int)v_a4,
+                     (unsigned int)v_a3,  (unsigned int)v_a2,
+                     (unsigned int)v_a1);
     if (n > 0) HAL_UART_Transmit(&huart1, (uint8_t*)line, (uint16_t)n, 100);
-    sps_counter++; // one sample-pair sent
+    sps_counter++;
   }
 }
 
 if (dma_full_ready) {
   dma_full_ready = 0;
-  for (uint32_t i = ADC_BUF_LEN/2; i < ADC_BUF_LEN; i += 2) {
-    uint16_t npb1 = adc_buf[i + 0];
-    uint16_t npb0 = adc_buf[i + 1];
+  for (uint32_t i = ADC_BUF_LEN/2; i < ADC_BUF_LEN; i += NUM_CHANNELS) {
+    uint16_t v_pb1 = adc_buf[i + 0];
+    uint16_t v_pb0 = adc_buf[i + 1];
+    uint16_t v_a7  = adc_buf[i + 2];
+    uint16_t v_a6  = adc_buf[i + 3];
+    uint16_t v_a5  = adc_buf[i + 4];
+    uint16_t v_a4  = adc_buf[i + 5];
+    uint16_t v_a3  = adc_buf[i + 6];
+    uint16_t v_a2  = adc_buf[i + 7];
+    uint16_t v_a1  = adc_buf[i + 8];
     uint32_t t_ms = sample_idx * 2U;
     sample_idx++;
-    int n = snprintf(line, sizeof(line), "%lu, %u, %u\r\n", t_ms, npb1, npb0);
+    int n = snprintf(line, sizeof(line),
+                     "%06lX,%03X,%03X,%03X,%03X,%03X,%03X,%03X,%03X,%03X;",
+                     (unsigned long)t_ms,
+                     (unsigned int)v_pb1, (unsigned int)v_pb0,
+                     (unsigned int)v_a7,  (unsigned int)v_a6,
+                     (unsigned int)v_a5,  (unsigned int)v_a4,
+                     (unsigned int)v_a3,  (unsigned int)v_a2,
+                     (unsigned int)v_a1);
     if (n > 0) HAL_UART_Transmit(&huart1, (uint8_t*)line, (uint16_t)n, 100);
     sps_counter++;
   }
 
-  // Opsional: indikator
   HAL_GPIO_TogglePin(LED_BUILTIN_GPIO_Port, LED_BUILTIN_Pin);
 }
 
@@ -160,14 +192,16 @@ uint32_t now = HAL_GetTick();
 if ((now - sps_last_ms) >= 1000U) {
   uint32_t sps = sps_counter;
   sps_counter = 0;
-  sps_last_ms += 1000U; // keep cadence, reduce drift
+  sps_last_ms += 1000U;
 
-  uint32_t eff = (target_sps > 0U) ? (sps * 100U) / target_sps : 0U;
-  int n = snprintf(line, sizeof(line),
-                   "# debug_info -> sps: %lu, target: %lu, efficiency: %lu%%\r\n",
-                   sps, target_sps, eff);
-  if (n > 0) {
-    HAL_UART_Transmit(&huart1, (uint8_t*)line, (uint16_t)n, 100);
+  if (debug_enabled) {
+    uint32_t eff = (target_sps > 0U) ? (sps * 100U) / target_sps : 0U;
+    int n = snprintf(line, sizeof(line),
+                     "\n# debug_info -> sps: %lu, target: %lu, efficiency: %lu%%\n",
+                     sps, target_sps, eff);
+    if (n > 0) {
+      HAL_UART_Transmit(&huart1, (uint8_t*)line, (uint16_t)n, 100);
+    }
   }
 }
   }
